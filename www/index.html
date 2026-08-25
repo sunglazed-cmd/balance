@@ -1,0 +1,1862 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<script>
+  // Fix mobile viewport-height bugs (Android address bar collapsing changes 100vh unreliably):
+  // provide a --vh custom property based on the real window height, kept in sync on resize.
+  (function(){
+    function setVH(){
+      document.documentElement.style.setProperty('--vh', (window.innerHeight*0.01)+'px');
+    }
+    setVH();
+    window.addEventListener('resize', setVH);
+    window.addEventListener('orientationchange', setVH);
+    document.addEventListener('visibilitychange', function(){ if(!document.hidden) setVH(); });
+    // Some native WebViews (e.g. Capacitor's Android WebView) report an incorrect
+    // window.innerHeight on the very first layout pass — recheck a few times shortly
+    // after load to self-correct instead of leaving the bottom nav stuck offscreen.
+    setTimeout(setVH, 100);
+    setTimeout(setVH, 400);
+    setTimeout(setVH, 1000);
+  })();
+</script>
+<meta name="theme-color" content="#14121B">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Баланс">
+<title>Баланс — трекер калорий</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Unbounded:wght@500;600;700;800&family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#100E17;
+    --bg-grad: radial-gradient(120% 90% at 50% -10%, #241E36 0%, #14121C 45%, #100E17 100%);
+    --surface: rgba(255,255,255,0.045);
+    --surface-solid: #1C1826;
+    --surface2: #252031;
+    --border: rgba(255,255,255,0.08);
+    --border-soft: rgba(255,255,255,0.05);
+    --intake:#4FD1C5;
+    --intake-dim: rgba(79,209,197,0.15);
+    --burn:#FF8A62;
+    --burn-dim: rgba(255,138,98,0.15);
+    --good:#8FD14F;
+    --over:#FF5C7A;
+    --text:#F5F3F8;
+    --muted:#948FA3;
+    --muted2:#6C6780;
+    --radius: 22px;
+    --radius-sm: 14px;
+    font-size: 16px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color: transparent;}
+  html,body{margin:0;padding:0;}
+  html, body{ overflow-x:hidden; }
+  body{
+    background: var(--bg-grad);
+    color: var(--text);
+    font-family:'Manrope', sans-serif;
+    min-height:100vh;               /* fallback for browsers without dvh */
+    min-height:calc(var(--vh, 1vh) * 100);
+    min-height:100dvh;
+    display:flex;
+    justify-content:center;
+    overscroll-behavior-y: none;
+  }
+  #phone{
+    width:100%;
+    max-width:460px;
+    min-width:0;
+    min-height:100vh;
+    min-height:calc(var(--vh, 1vh) * 100);
+    min-height:100dvh;
+    position:relative;
+    display:flex;
+    flex-direction:column;
+    background: var(--bg-grad);
+  }
+  @media (min-width:520px){
+    body{padding:28px 0;}
+    #phone{
+      min-height:calc(100vh - 56px);
+      min-height:calc(var(--vh, 1vh) * 100 - 56px);
+      min-height:calc(100dvh - 56px);
+      border-radius: 40px;
+      box-shadow: 0 40px 90px rgba(0,0,0,0.55), 0 0 0 1px rgba(255,255,255,0.06);
+      overflow:hidden;
+    }
+    .navbar{
+      position:absolute; left:0; right:0; bottom:0; transform:none; max-width:none;
+      border-radius: 0 0 40px 40px;
+    }
+  }
+  .num{font-family:'JetBrains Mono', monospace;}
+  .display{font-family:'Unbounded', sans-serif;}
+  h1,h2,h3{font-family:'Unbounded', sans-serif; margin:0; font-weight:700; letter-spacing:-0.01em;}
+  p{margin:0;}
+  button{font-family:inherit; border:none; cursor:pointer; background:none; color:inherit;}
+  input,select{font-family:inherit; color:var(--text); background:transparent; border:none; outline:none; width:100%; min-width:0;}
+  ::selection{background: var(--intake); color:#0A0A0A;}
+
+  /* ---------- top bar ---------- */
+  .topbar{
+    padding: 22px 22px 6px 22px;
+    display:flex; align-items:baseline; justify-content:space-between;
+  }
+  .topbar .eyebrow{
+    font-size:12px; letter-spacing:0.14em; text-transform:uppercase; color:var(--muted2); font-weight:700;
+  }
+  .topbar h1{font-size:22px;}
+  .topbar .date{font-size:13px; color:var(--muted); font-weight:600;}
+
+  .view{ padding: 4px 20px 110px 20px; flex:1; min-width:0; }
+  .view[hidden]{display:none;}
+
+  /* ---------- ring ---------- */
+  .ring-wrap{
+    position:relative;
+    width: 250px; height:250px;
+    margin: 14px auto 6px auto;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .ring-wrap svg{ transform: rotate(-90deg); width:100%; height:100%; }
+  .ring-track{ fill:none; stroke:var(--surface2); stroke-width:16; }
+  .ring-fg{ fill:none; stroke-width:16; stroke-linecap:round; transition: stroke-dashoffset 1s cubic-bezier(.4,0,.2,1), stroke 0.6s ease; }
+  .ring-center{ position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:2px; text-align:center; }
+  .ring-center .big{ font-size:44px; font-weight:800; line-height:1; letter-spacing:-0.02em; }
+  .ring-center .lbl{ font-size:12.5px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:0.08em; margin-top:6px;}
+  .ring-center .status{ font-size:12px; margin-top:8px; padding:4px 10px; border-radius:20px; font-weight:700; }
+
+  .chips{ display:flex; gap:10px; margin: 18px 0 6px 0; }
+  .chip{
+    flex:1; min-width:0; background:var(--surface); border:1px solid var(--border-soft); border-radius:16px;
+    padding:12px 10px; text-align:center;
+  }
+  .chip .dot{ width:7px; height:7px; border-radius:50%; display:inline-block; margin-right:5px; }
+  .chip .k{ font-size:11px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:0.05em;}
+  .chip .v{ font-size:19px; font-weight:800; margin-top:3px; font-family:'JetBrains Mono',monospace;}
+
+  /* ---------- pedometer ---------- */
+  .pedo-card{
+    margin-top:14px; background:linear-gradient(135deg, rgba(79,209,197,0.10), rgba(255,138,98,0.06));
+    border:1px solid var(--border-soft); border-radius:20px; padding:16px;
+  }
+  .pedo-top{ display:flex; align-items:center; gap:12px; }
+  .pedo-icon{ width:44px; height:44px; border-radius:13px; background:var(--surface); display:flex; align-items:center; justify-content:center; font-size:21px; flex-shrink:0; }
+  .pedo-main{ flex:1; min-width:0; }
+  .pedo-steps{ display:flex; align-items:baseline; gap:6px; }
+  .pedo-steps .num{ font-size:26px; font-weight:800; line-height:1; }
+  .pedo-steps-lbl{ font-size:12px; color:var(--muted); font-weight:700; }
+  .pedo-sub{ font-size:12.5px; color:var(--muted); margin-top:4px; font-weight:600; }
+  .pedo-sep{ margin:0 6px; opacity:0.5; }
+  .pedo-toggle{
+    display:flex; align-items:center; gap:7px; background:var(--surface); border:1px solid var(--border-soft);
+    padding:9px 13px; border-radius:30px; font-size:12.5px; font-weight:700; color:var(--text); flex-shrink:0;
+    white-space:nowrap;
+  }
+  .pedo-dot{ width:8px; height:8px; border-radius:50%; background:var(--muted2); flex-shrink:0; }
+  .pedo-dot.active{ background:var(--good); box-shadow:0 0 0 0 rgba(143,209,79,0.6); animation: pedo-pulse 1.6s infinite; }
+  .pedo-dot.pending{ background:#F5C34D; }
+  @keyframes pedo-pulse{
+    0%{ box-shadow:0 0 0 0 rgba(143,209,79,0.55); }
+    70%{ box-shadow:0 0 0 7px rgba(143,209,79,0); }
+    100%{ box-shadow:0 0 0 0 rgba(143,209,79,0); }
+  }
+  .pedo-note{ font-size:11px; color:var(--muted2); line-height:1.5; margin-top:12px; }
+
+  /* ---------- section headers ---------- */
+  .sec-head{ display:flex; align-items:center; justify-content:space-between; margin: 26px 0 12px 0; }
+  .sec-head h2{ font-size:16px; }
+  .add-btn{
+    display:flex; align-items:center; gap:6px;
+    background: var(--surface); border:1px solid var(--border-soft);
+    padding:8px 14px; border-radius:30px; font-size:13px; font-weight:700; color:var(--text);
+  }
+  .add-btn.food{ box-shadow: inset 0 0 0 1px rgba(79,209,197,0.25); }
+  .add-btn.workout{ box-shadow: inset 0 0 0 1px rgba(255,138,98,0.25); }
+  .add-btn svg{ width:14px; height:14px; }
+
+  /* ---------- entry rows ---------- */
+  .entry-list{ display:flex; flex-direction:column; gap:8px; }
+  .entry{
+    display:flex; align-items:center; gap:12px;
+    background:var(--surface); border:1px solid var(--border-soft); border-radius:16px;
+    padding:12px 12px; cursor:pointer;
+  }
+  .entry .ico{
+    width:38px; height:38px; border-radius:11px; flex-shrink:0;
+    display:flex; align-items:center; justify-content:center; font-size:17px;
+  }
+  .entry.food .ico{ background:var(--intake-dim); }
+  .entry.workout .ico{ background:var(--burn-dim); }
+  .entry .info{ flex:1; min-width:0; }
+  .entry .info .name{ font-size:14.5px; font-weight:700; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .entry .info .sub{ font-size:12.5px; color:var(--muted); margin-top:2px; }
+  .entry .kcal{ font-family:'JetBrains Mono',monospace; font-weight:700; font-size:14px; white-space:nowrap; }
+  .entry.food .kcal{ color:var(--intake); }
+  .entry.workout .kcal{ color:var(--burn); }
+  .entry .del{ width:26px; height:26px; border-radius:50%; display:flex; align-items:center; justify-content:center; color:var(--muted2); flex-shrink:0; }
+  .entry .del:active{ background:rgba(255,92,122,0.18); color:var(--over); }
+  .empty-hint{ text-align:center; color:var(--muted2); font-size:13px; padding: 22px 10px; border:1px dashed var(--border); border-radius:16px; }
+
+  /* ---------- bottom nav ---------- */
+  .navbar{
+    position:fixed; left:50%; bottom:0; transform:translateX(-50%);
+    width:100%; max-width:460px;
+    background: rgba(20,17,28,0.82);
+    backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
+    border-top:1px solid var(--border-soft);
+    display:flex; padding: 8px 10px calc(10px + env(safe-area-inset-bottom)) 10px;
+    z-index:40;
+  }
+  .navbtn{ flex:1; display:flex; flex-direction:column; align-items:center; gap:4px; padding:6px 0; color:var(--muted2); }
+  .navbtn svg{ width:21px; height:21px; }
+  .navbtn span{ font-size:10.5px; font-weight:700; }
+  .navbtn.active{ color: var(--intake); }
+
+  /* ---------- history ---------- */
+  .hist-subnav{ display:flex; background:var(--surface); border:1px solid var(--border-soft); border-radius:14px; padding:4px; gap:4px; margin-bottom:16px; }
+  .hist-subnav button{ flex:1; padding:9px 4px; border-radius:10px; font-size:13px; font-weight:700; color:var(--muted); text-align:center; }
+  .hist-subnav button.on{ background:var(--surface2); color:var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+
+  .cal-nav{ display:flex; align-items:center; justify-content:space-between; margin-bottom:14px; }
+  .cal-nav .cal-title{ font-size:16px; font-weight:800; font-family:'Unbounded',sans-serif; text-transform:capitalize; }
+  .cal-nav-btn{ width:34px; height:34px; border-radius:50%; background:var(--surface); border:1px solid var(--border-soft); display:flex; align-items:center; justify-content:center; color:var(--muted); }
+  .cal-nav-btn svg{ width:15px; height:15px; }
+
+  .cal-card{ background:var(--surface); border:1px solid var(--border-soft); border-radius:var(--radius); padding:18px 14px; }
+  .cal-weekdays{ display:grid; grid-template-columns:repeat(7,1fr); margin-bottom:8px; }
+  .cal-weekdays div{ text-align:center; font-size:11px; font-weight:700; color:var(--muted2); text-transform:uppercase; }
+  .cal-grid{ display:grid; grid-template-columns:repeat(7,1fr); gap:6px; }
+  .cal-cell{
+    aspect-ratio:1; border-radius:10px; display:flex; align-items:center; justify-content:center;
+    font-size:12.5px; font-weight:700; color:var(--text); position:relative; background:var(--surface2);
+    border:1px solid transparent;
+  }
+  .cal-cell.empty{ background:transparent; }
+  .cal-cell.nodata{ background:var(--surface2); color:var(--muted2); }
+  .cal-cell.future{ background:transparent; color:var(--muted2); border:1px dashed var(--border); }
+  .cal-cell.is-today{ border:2px solid var(--text); }
+  .cal-cell.selected{ box-shadow:0 0 0 2px var(--text); }
+  .cal-legend{ display:flex; gap:16px; justify-content:center; margin-top:16px; }
+  .cal-legend .li{ display:flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted); font-weight:600; }
+  .cal-legend .sw{ width:10px; height:10px; border-radius:3px; }
+
+  .day-detail{
+    margin-top:14px; background:var(--surface); border:1px solid var(--border-soft); border-radius:16px;
+    padding:14px 16px; display:none;
+  }
+  .day-detail.show{ display:block; }
+  .day-detail .dd-title{ font-size:13.5px; font-weight:800; margin-bottom:10px; text-transform:capitalize; }
+  .day-detail .dd-row{ display:flex; justify-content:space-between; font-size:13px; color:var(--muted); padding:4px 0; }
+  .day-detail .dd-row b{ color:var(--text); font-family:'JetBrains Mono',monospace; font-weight:700; }
+  .dd-edit-btn{
+    width:100%; margin-top:12px; padding:11px; border-radius:12px; background:var(--surface2);
+    border:1px solid var(--border); font-size:13px; font-weight:700; color:var(--text); text-align:center;
+  }
+  .dayedit-summary{ display:flex; gap:8px; }
+  .dayedit-summary .stat-card{ padding:10px; }
+  .dayedit-summary .stat-card .v{ font-size:16px; }
+  .dayedit-summary .stat-card .k{ font-size:10px; }
+
+  .year-scroll{ overflow-x:auto; padding-bottom:6px; }
+  .year-inner{ display:inline-flex; flex-direction:column; gap:4px; min-width:100%; }
+  .year-labels{ display:grid; grid-auto-flow:column; grid-auto-columns:11px; gap:3px; height:12px; }
+  .year-labels span{ grid-row:1; font-size:9.5px; color:var(--muted2); font-weight:700; }
+  .year-grid{ display:grid; grid-auto-flow:column; grid-template-rows:repeat(7,11px); grid-auto-columns:11px; gap:3px; }
+  .year-cell{ width:11px; height:11px; border-radius:3px; background:var(--surface2); }
+  .year-cell.future{ background:transparent; border:1px dashed var(--border-soft); }
+
+  .week-card{
+    background:var(--surface); border:1px solid var(--border-soft); border-radius: var(--radius);
+    padding:20px 16px 14px 16px;
+  }
+  .bars{ display:flex; align-items:flex-end; justify-content:space-between; height:150px; padding: 0 4px; position:relative; }
+  .bars .baseline{ position:absolute; left:0; right:0; bottom:0; height:1px; background:var(--border); }
+  .bar-col{ display:flex; flex-direction:column; align-items:center; gap:8px; width:13%; }
+  .bar-track{ width:100%; height:110px; display:flex; align-items:flex-end; border-radius:8px; overflow:visible; position:relative; }
+  .bar-fill{ width:100%; border-radius:8px; transition: height 0.8s cubic-bezier(.4,0,.2,1); min-height:4px; }
+  .bar-col .dlabel{ font-size:11px; color:var(--muted); font-weight:700; }
+  .bar-col.today .dlabel{ color:var(--text); }
+  .stat-row{ display:flex; gap:10px; margin-top:18px; }
+  .stat-card{ flex:1; min-width:0; background:var(--surface); border:1px solid var(--border-soft); border-radius:16px; padding:14px; }
+  .stat-card .v{ font-size:20px; font-weight:800; font-family:'JetBrains Mono',monospace; }
+  .stat-card .k{ font-size:11.5px; color:var(--muted); font-weight:700; margin-top:4px; }
+
+  /* ---------- profile ---------- */
+  .field{ margin-bottom:16px; min-width:0; }
+  .field label{ display:block; font-size:12.5px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.05em; margin-bottom:8px; }
+  .field-input{
+    background:var(--surface); border:1px solid var(--border-soft); border-radius:14px;
+    padding:14px 16px; font-size:15.5px; font-weight:600; width:100%; min-width:0; box-sizing:border-box;
+  }
+  .seg{ display:flex; background:var(--surface); border:1px solid var(--border-soft); border-radius:14px; padding:4px; gap:4px; min-width:0; }
+  .seg button{ flex:1; min-width:0; padding:10px 4px; border-radius:10px; font-size:13px; font-weight:700; color:var(--muted); text-align:center; }
+  .seg button.on{ background: var(--surface2); color:var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+  .grid2{ display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:12px; }
+  .primary-btn{
+    width:100%; padding:16px; border-radius:16px; font-size:15px; font-weight:800;
+    background: linear-gradient(120deg, var(--intake), #37B8AC); color:#0A1512; margin-top:6px;
+    box-shadow: 0 8px 24px rgba(79,209,197,0.25);
+  }
+  .tdee-preview{
+    background: linear-gradient(135deg, rgba(79,209,197,0.13), rgba(255,138,98,0.10));
+    border:1px solid var(--border-soft); border-radius:18px; padding:18px; text-align:center; margin: 20px 0;
+  }
+  .tdee-preview .v{ font-size:34px; font-weight:800; font-family:'JetBrains Mono',monospace; }
+  .tdee-preview .k{ font-size:12px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:0.06em; margin-top:4px;}
+
+  /* ---------- modal / sheet ---------- */
+  .overlay{
+    position:fixed; inset:0; background:rgba(8,7,12,0.6); backdrop-filter: blur(2px);
+    display:flex; align-items:flex-end; justify-content:center; z-index:100;
+    opacity:0; pointer-events:none; transition: opacity 0.25s ease;
+  }
+  .overlay.show{ opacity:1; pointer-events:auto; }
+  .sheet{
+    width:100%; max-width:460px; background: #1A1725; border-radius: 26px 26px 0 0;
+    padding: 10px 20px calc(24px + env(safe-area-inset-bottom)) 20px; max-height:86vh; overflow-y:auto;
+    transform: translateY(100%); transition: transform 0.32s cubic-bezier(.32,.72,0,1);
+    border-top:1px solid var(--border-soft);
+  }
+  .overlay.show .sheet{ transform: translateY(0); }
+  .sheet-handle{ width:38px; height:4px; border-radius:4px; background:var(--surface2); margin:6px auto 14px auto; }
+  .sheet h3{ font-size:18px; margin-bottom:16px; }
+  .search-box{
+    display:flex; align-items:center; gap:10px; background:var(--surface); border:1px solid var(--border-soft);
+    border-radius:14px; padding:13px 15px; margin-bottom:10px;
+  }
+  .search-box svg{ width:16px; height:16px; color:var(--muted2); flex-shrink:0; }
+  .search-box input{ flex:1; min-width:0; font-size:15px; font-weight:600; }
+  .suggest-list{ display:flex; flex-direction:column; gap:6px; max-height: 240px; overflow-y:auto; margin-bottom:6px;}
+  .suggest-item{ display:flex; justify-content:space-between; align-items:center; padding:11px 13px; border-radius:12px; background:var(--surface); }
+  .suggest-item .n{ font-size:14px; font-weight:700; }
+  .suggest-item .k{ font-size:12.5px; color:var(--muted); font-family:'JetBrains Mono',monospace; }
+  .online-row{ display:flex; gap:10px; margin-top:6px; }
+  .online-btn{ flex:1; padding:12px; border-radius:14px; background:var(--surface); border:1px solid var(--border-soft); font-size:13px; font-weight:700; text-align:center; display:flex; align-items:center; justify-content:center; gap:6px;}
+  .online-btn svg{ width:14px; height:14px; }
+  .selected-box{ background:var(--surface); border:1px solid var(--border-soft); border-radius:16px; padding:16px; margin-top:14px; }
+  .selected-box .sname{ font-size:15px; font-weight:800; margin-bottom:12px; }
+  .row-inline{ display:flex; gap:12px; align-items:flex-end; }
+  .row-inline .field{ flex:1; min-width:0; margin-bottom:0; }
+  .preview-kcal{ text-align:center; margin: 16px 0 4px 0; }
+  .preview-kcal .v{ font-size:30px; font-weight:800; font-family:'JetBrains Mono',monospace; }
+  .preview-kcal .k{ font-size:11.5px; color:var(--muted); font-weight:700; text-transform:uppercase; letter-spacing:0.06em; }
+  .spinner{ width:16px; height:16px; border-radius:50%; border:2px solid rgba(255,255,255,0.2); border-top-color:var(--text); animation: spin 0.7s linear infinite; }
+  @keyframes spin{ to{ transform: rotate(360deg); } }
+  .muted-note{ font-size:12px; color:var(--muted2); text-align:center; margin-top:10px; line-height:1.5; }
+  .close-x{ position:absolute; top:14px; right:16px; width:30px; height:30px; border-radius:50%; background:var(--surface); display:flex; align-items:center; justify-content:center; color:var(--muted); }
+
+  .toast{
+    position:fixed; left:50%; bottom:100px; transform:translateX(-50%) translateY(20px);
+    background:#232030; border:1px solid var(--border); color:var(--text); padding:12px 18px; border-radius:30px;
+    font-size:13px; font-weight:700; z-index:200; opacity:0; transition: all 0.3s ease; pointer-events:none;
+    box-shadow:0 10px 30px rgba(0,0,0,0.4);
+  }
+  .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
+
+  ::-webkit-scrollbar{ width:0; height:0; }
+</style>
+</head>
+<body>
+<div id="phone">
+
+  <!-- ============ TODAY ============ -->
+  <div class="view" id="view-today">
+    <div class="topbar">
+      <div>
+        <div class="eyebrow" id="greeting">баланс</div>
+        <h1 id="today-title">Сегодня</h1>
+      </div>
+      <div class="date" id="today-date"></div>
+    </div>
+
+    <div class="ring-wrap">
+      <svg viewBox="0 0 220 220">
+        <defs>
+          <linearGradient id="gradGood" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#4FD1C5"/>
+            <stop offset="100%" stop-color="#37B8AC"/>
+          </linearGradient>
+          <linearGradient id="gradWarn" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#4FD1C5"/>
+            <stop offset="100%" stop-color="#FF8A62"/>
+          </linearGradient>
+          <linearGradient id="gradOver" x1="0%" y1="0%" x2="100%" y2="100%">
+            <stop offset="0%" stop-color="#FF8A62"/>
+            <stop offset="100%" stop-color="#FF5C7A"/>
+          </linearGradient>
+        </defs>
+        <circle class="ring-track" cx="110" cy="110" r="94"/>
+        <circle class="ring-fg" id="ring-fg" cx="110" cy="110" r="94"/>
+      </svg>
+      <div class="ring-center">
+        <div class="big num" id="ring-big">0</div>
+        <div class="lbl" id="ring-lbl">осталось ккал</div>
+        <div class="status" id="ring-status">Загрузка…</div>
+      </div>
+    </div>
+
+    <div class="chips">
+      <div class="chip"><div class="k"><span class="dot" style="background:var(--muted2)"></span>Бюджет</div><div class="v" id="chip-budget">0</div></div>
+      <div class="chip"><div class="k"><span class="dot" style="background:var(--intake)"></span>Съедено</div><div class="v" id="chip-eaten">0</div></div>
+      <div class="chip"><div class="k"><span class="dot" style="background:var(--burn)"></span>Сожжено</div><div class="v" id="chip-burned">0</div></div>
+    </div>
+
+    <div class="pedo-card">
+      <div class="pedo-top">
+        <div class="pedo-icon">👟</div>
+        <div class="pedo-main">
+          <div class="pedo-steps"><span class="num" id="pedo-steps">0</span><span class="pedo-steps-lbl">шагов</span></div>
+          <div class="pedo-sub">
+            <span id="pedo-distance">0.0 км</span>
+            <span class="pedo-sep">·</span>
+            <span id="pedo-kcal">0 ккал</span>
+          </div>
+        </div>
+        <button class="pedo-toggle" id="pedo-toggle" onclick="togglePedometer()">
+          <span class="pedo-dot" id="pedo-dot"></span>
+          <span id="pedo-toggle-lbl">Запустить</span>
+        </button>
+      </div>
+      <div class="pedo-note" id="pedo-note">Считает шаги, пока приложение открыто на экране. Полный фоновый подсчёт недоступен веб-приложениям на Android.</div>
+    </div>
+
+    <div class="sec-head">
+      <h2>Еда</h2>
+      <button class="add-btn food" onclick="addTargetMode='today'; openFoodModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Добавить
+      </button>
+    </div>
+    <div class="entry-list" id="food-list"></div>
+
+    <div class="sec-head">
+      <h2>Тренировки</h2>
+      <button class="add-btn workout" onclick="addTargetMode='today'; openWorkoutModal()">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+        Добавить
+      </button>
+    </div>
+    <div class="entry-list" id="workout-list"></div>
+  </div>
+
+  <!-- ============ HISTORY ============ -->
+  <div class="view" id="view-history" hidden>
+    <div class="topbar">
+      <div>
+        <div class="eyebrow" id="hist-eyebrow">неделя</div>
+        <h1>История</h1>
+      </div>
+    </div>
+
+    <div class="hist-subnav">
+      <button id="hsub-week" class="on" onclick="setHistorySubtab('week')">Неделя</button>
+      <button id="hsub-month" onclick="setHistorySubtab('month')">Месяц</button>
+      <button id="hsub-year" onclick="setHistorySubtab('year')">Год</button>
+    </div>
+
+    <!-- week -->
+    <div id="hist-week-view">
+      <div class="week-card">
+        <div class="bars" id="week-bars">
+          <div class="baseline"></div>
+        </div>
+      </div>
+      <div class="stat-row">
+        <div class="stat-card"><div class="v" id="hist-avg">0</div><div class="k">Средний баланс</div></div>
+        <div class="stat-card"><div class="v" id="hist-days-ok">0/7</div><div class="k">Дней в бюджете</div></div>
+      </div>
+    </div>
+
+    <!-- month -->
+    <div id="hist-month-view" style="display:none;">
+      <div class="cal-nav">
+        <button class="cal-nav-btn" onclick="shiftMonth(-1)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="cal-title" id="cal-month-title">—</div>
+        <button class="cal-nav-btn" onclick="shiftMonth(1)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+      <div class="cal-card">
+        <div class="cal-weekdays"><div>Пн</div><div>Вт</div><div>Ср</div><div>Чт</div><div>Пт</div><div>Сб</div><div>Вс</div></div>
+        <div class="cal-grid" id="cal-grid"></div>
+        <div class="cal-legend">
+          <div class="li"><span class="sw" style="background:var(--good);"></span>Экономия</div>
+          <div class="li"><span class="sw" style="background:var(--over);"></span>Перебор</div>
+          <div class="li"><span class="sw" style="background:var(--surface2); border:1px solid var(--border);"></span>Нет данных</div>
+        </div>
+      </div>
+      <div class="day-detail" id="day-detail"></div>
+    </div>
+
+    <!-- year -->
+    <div id="hist-year-view" style="display:none;">
+      <div class="cal-nav">
+        <button class="cal-nav-btn" onclick="shiftYear(-1)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M15 18l-6-6 6-6"/></svg>
+        </button>
+        <div class="cal-title" id="cal-year-title">—</div>
+        <button class="cal-nav-btn" onclick="shiftYear(1)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M9 18l6-6-6-6"/></svg>
+        </button>
+      </div>
+      <div class="cal-card">
+        <div class="year-scroll">
+          <div class="year-inner">
+            <div class="year-labels" id="year-labels"></div>
+            <div class="year-grid" id="year-grid"></div>
+          </div>
+        </div>
+        <div class="cal-legend">
+          <div class="li"><span class="sw" style="background:var(--good);"></span>Экономия</div>
+          <div class="li"><span class="sw" style="background:var(--over);"></span>Перебор</div>
+        </div>
+      </div>
+      <div class="stat-row">
+        <div class="stat-card"><div class="v" id="year-avg">0</div><div class="k">Средний баланс за год</div></div>
+        <div class="stat-card"><div class="v" id="year-days-ok">0</div><div class="k">Дней в бюджете</div></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ PROFILE ============ -->
+  <div class="view" id="view-profile" hidden>
+    <div class="topbar">
+      <div>
+        <div class="eyebrow">настройки</div>
+        <h1>Профиль</h1>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Пол</label>
+      <div class="seg">
+        <button id="seg-m" onclick="setGender('m')">Мужчина</button>
+        <button id="seg-f" onclick="setGender('f')">Женщина</button>
+      </div>
+    </div>
+
+    <div class="grid2">
+      <div class="field">
+        <label>Возраст, лет</label>
+        <div class="field-input"><input id="in-age" type="number" inputmode="numeric" placeholder="28"></div>
+      </div>
+      <div class="field">
+        <label>Вес, кг</label>
+        <div class="field-input"><input id="in-weight" type="number" inputmode="decimal" placeholder="70"></div>
+      </div>
+    </div>
+    <div class="field">
+      <label>Рост, см</label>
+      <div class="field-input"><input id="in-height" type="number" inputmode="numeric" placeholder="175"></div>
+    </div>
+
+    <div class="field">
+      <label>Активность в течение дня</label>
+      <div class="seg" style="flex-wrap:wrap;">
+        <button id="seg-a1" onclick="setActivity(1.2)" style="flex:1 1 30%;">Минимум</button>
+        <button id="seg-a2" onclick="setActivity(1.375)" style="flex:1 1 30%;">1–3 трен/нед</button>
+        <button id="seg-a3" onclick="setActivity(1.55)" style="flex:1 1 30%;">3–5 трен/нед</button>
+        <button id="seg-a4" onclick="setActivity(1.725)" style="flex:1 1 30%; margin-top:4px;">6–7 трен/нед</button>
+        <button id="seg-a5" onclick="setActivity(1.9)" style="flex:1 1 30%; margin-top:4px;">Физ. труд</button>
+      </div>
+    </div>
+
+    <div class="field">
+      <label>Цель</label>
+      <div class="seg">
+        <button id="seg-lose" onclick="setGoal('lose')">Похудение</button>
+        <button id="seg-maintain" onclick="setGoal('maintain')">Баланс</button>
+        <button id="seg-gain" onclick="setGoal('gain')">Набор массы</button>
+      </div>
+    </div>
+
+    <div class="tdee-preview">
+      <div class="v num" id="profile-tdee-preview">—</div>
+      <div class="k">дневной бюджет калорий (TDEE с учётом цели)</div>
+    </div>
+
+    <button class="primary-btn" onclick="saveProfile()">Сохранить профиль</button>
+    <p class="muted-note">Расчёт по формуле Миффлина–Сан Жеора. Бюджет — ориентир: слушай своё тело и корректируй при необходимости.</p>
+  </div>
+
+  <!-- ============ NAV ============ -->
+  <div class="navbar" id="navbar">
+    <button class="navbtn active" data-tab="today" onclick="switchView('today')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 3"/></svg>
+      <span>Сегодня</span>
+    </button>
+    <button class="navbtn" data-tab="history" onclick="switchView('history')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 19V9M10 19V4M16 19v-7M22 19H2"/></svg>
+      <span>История</span>
+    </button>
+    <button class="navbtn" data-tab="profile" onclick="switchView('profile')">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="8" r="4"/><path d="M4 20c0-4 4-6 8-6s8 2 8 6"/></svg>
+      <span>Профиль</span>
+    </button>
+  </div>
+
+  <!-- ============ FOOD MODAL ============ -->
+  <div class="overlay" id="overlay-food" onclick="if(event.target===this) closeFoodModal()">
+    <div class="sheet">
+      <div class="close-x" onclick="closeFoodModal()">✕</div>
+      <div class="sheet-handle"></div>
+      <h3 id="food-modal-title">Добавить еду</h3>
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+        <input id="food-search" placeholder="Например: куриная грудка" oninput="onFoodSearch()">
+      </div>
+      <div class="suggest-list" id="food-suggest"></div>
+      <div id="food-online-row" class="online-row" style="display:none;">
+        <button class="online-btn" id="btn-search-online" onclick="searchFoodOnlineHandler()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+          Искать в интернете
+        </button>
+        <button class="online-btn" onclick="manualFoodEntry()">Указать вручную</button>
+      </div>
+
+      <div class="selected-box" id="food-selected" style="display:none;">
+        <div class="sname" id="food-selected-name">—</div>
+        <div class="row-inline">
+          <div class="field">
+            <label>Ккал / 100г</label>
+            <div class="field-input"><input id="food-kcal100" type="number" inputmode="decimal" oninput="updateFoodPreview()"></div>
+          </div>
+          <div class="field">
+            <label>Граммы</label>
+            <div class="field-input"><input id="food-grams" type="number" inputmode="numeric" value="100" oninput="updateFoodPreview()"></div>
+          </div>
+        </div>
+        <div class="preview-kcal">
+          <div class="v num" id="food-preview-kcal">0</div>
+          <div class="k">ккал в этой порции</div>
+        </div>
+        <button class="primary-btn" onclick="confirmAddFood()">Добавить в дневник</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ WORKOUT MODAL ============ -->
+  <div class="overlay" id="overlay-workout" onclick="if(event.target===this) closeWorkoutModal()">
+    <div class="sheet">
+      <div class="close-x" onclick="closeWorkoutModal()">✕</div>
+      <div class="sheet-handle"></div>
+      <h3 id="workout-modal-title">Добавить тренировку</h3>
+      <div class="search-box">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4-4"/></svg>
+        <input id="workout-search" placeholder="Например: бег" oninput="onWorkoutSearch()">
+      </div>
+      <div class="suggest-list" id="workout-suggest"></div>
+      <div class="online-row">
+        <button class="online-btn" onclick="manualWorkoutEntry()">Своя активность (ввести ккал вручную)</button>
+      </div>
+
+      <div class="selected-box" id="workout-selected" style="display:none;">
+        <div class="sname" id="workout-selected-name">—</div>
+        <div id="workout-met-row" class="row-inline">
+          <div class="field">
+            <label>Минут</label>
+            <div class="field-input"><input id="workout-minutes" type="number" inputmode="numeric" value="30" oninput="updateWorkoutPreview()"></div>
+          </div>
+        </div>
+        <div id="workout-manual-row" class="row-inline" style="display:none; margin-top:12px;">
+          <div class="field">
+            <label>Сожжено ккал</label>
+            <div class="field-input"><input id="workout-manual-kcal" type="number" inputmode="numeric" oninput="updateWorkoutPreview()"></div>
+          </div>
+        </div>
+        <div class="preview-kcal">
+          <div class="v num" id="workout-preview-kcal">0</div>
+          <div class="k">сожжено ккал</div>
+        </div>
+        <button class="primary-btn" onclick="confirmAddWorkout()">Добавить в дневник</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ DAY EDITOR (edit/backfill a past day) ============ -->
+  <div class="overlay" id="overlay-dayedit" onclick="if(event.target===this) closeDayEditor()">
+    <div class="sheet" style="max-height:92vh;">
+      <div class="close-x" onclick="closeDayEditor()">✕</div>
+      <div class="sheet-handle"></div>
+      <h3 id="dayedit-title">Редактирование дня</h3>
+
+      <div class="dayedit-summary" id="dayedit-summary"></div>
+
+      <div class="field" style="margin-top:16px;">
+        <label>Шаги (можно скорректировать вручную)</label>
+        <div class="field-input"><input id="dayedit-steps-input" type="number" inputmode="numeric" min="0" onchange="updateDayEditorSteps()"></div>
+      </div>
+
+      <div class="sec-head" style="margin-top:18px;">
+        <h2>Еда</h2>
+        <button class="add-btn food" onclick="addTargetMode='dayeditor'; openFoodModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Добавить
+        </button>
+      </div>
+      <div class="entry-list" id="dayedit-food-list"></div>
+
+      <div class="sec-head">
+        <h2>Тренировки</h2>
+        <button class="add-btn workout" onclick="addTargetMode='dayeditor'; openWorkoutModal()">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+          Добавить
+        </button>
+      </div>
+      <div class="entry-list" id="dayedit-workout-list" style="margin-bottom:8px;"></div>
+    </div>
+  </div>
+
+  <div class="toast" id="toast"></div>
+</div>
+
+<script>
+/* ===================== DATA ===================== */
+const FOOD_DB = [
+["Куриная грудка",165],["Куриное бедро",185],["Куриные крылышки",203],["Говядина",250],["Свинина",260],
+["Индейка филе",190],["Фарш говяжий",254],["Фарш куриный",143],["Лосось",208],["Тунец консерв.",116],
+["Треска",82],["Креветки",99],["Яйцо куриное",155],["Творог 5%",121],["Творог обезжиренный",71],
+["Йогурт натуральный",60],["Йогурт греческий",59],["Молоко 3.2%",60],["Молоко 1.5%",44],["Кефир 1%",40],
+["Сыр твёрдый",350],["Сыр моцарелла",280],["Сыр фета",264],["Рис белый варёный",130],["Рис бурый варёный",111],
+["Гречка варёная",92],["Овсянка варёная",88],["Овсяные хлопья сухие",342],["Макароны варёные",131],
+["Киноа варёная",120],["Картофель варёный",82],["Картофель жареный",312],["Картофель фри",312],
+["Хлеб белый",265],["Хлеб чёрный",250],["Хлеб цельнозерновой",247],["Батон",264],["Лаваш",236],
+["Банан",89],["Яблоко",52],["Апельсин",43],["Виноград",69],["Груша",57],["Клубника",33],["Черника",57],
+["Киви",61],["Манго",60],["Авокадо",160],["Помидор",18],["Огурец",15],["Морковь",41],["Капуста белокочанная",25],
+["Брокколи",34],["Шпинат",23],["Лук репчатый",40],["Чеснок",149],["Перец болгарский",27],
+["Фасоль варёная",127],["Чечевица варёная",116],["Нут варёный",164],["Грибы шампиньоны",27],
+["Орехи грецкие",654],["Миндаль",579],["Арахис",567],["Кешью",553],["Фисташки",560],["Семечки подсолнечные",584],
+["Мёд",304],["Сахар",387],["Оливковое масло",884],["Сливочное масло",717],["Подсолнечное масло",884],
+["Шоколад молочный",535],["Шоколад тёмный",546],["Мороженое",207],["Пицца Маргарита",266],["Бургер",295],
+["Суши/роллы (микс)",150],["Паста Карбонара",195],["Плов",200],["Борщ",49],["Куриный суп",55],
+["Кофе с молоком",40],["Пиво",43],["Вино красное",85],["Кола",42],["Апельсиновый сок",45],
+["Тофу",76],["Хумус",166],["Оливки",115],["Гранола",471],["Хлопья кукурузные",357],["Печенье овсяное",437],
+["Пельмени",275],["Сосиски",266],["Колбаса варёная",257],["Бекон",541],["Икра красная",245]
+];
+
+const WORKOUT_DB = [
+["Ходьба в среднем темпе",3.5],["Быстрая ходьба",4.3],["Бег 8 км/ч",8.3],["Бег 10 км/ч",9.8],
+["Бег 12 км/ч",11.8],["Велосипед — умеренно",7.5],["Велосипед — интенсивно",10.0],["Плавание",7.0],
+["Силовая тренировка",5.0],["Кроссфит",8.0],["Йога",2.5],["Пилатес",3.0],["Прыжки на скакалке",11.0],
+["Футбол",7.0],["Баскетбол",6.5],["Теннис",7.0],["Танцы",4.8],["Гребной тренажёр",7.0],
+["Эллиптический тренажёр",5.0],["Бокс",9.0],["Хайкинг / поход",6.0],["Растяжка",2.3],["Домашняя уборка",3.0]
+];
+
+/* ===================== STATE ===================== */
+let profile = null;      // {gender, age, height, weight, activity, goal}
+let customFoods = [];    // [{name, kcal100g}]
+let today = { foods: [], workouts: [] };
+let currentDayKey = null; // date key that `today` currently holds data for
+let historyCache = {};   // dateKey -> {foods,workouts}
+let currentTab = 'today';
+let genderVal = 'm', activityVal = 1.375, goalVal = 'maintain';
+let foodSelectedName = null;
+let workoutSelectedName = null;
+let workoutMode = 'met'; // 'met' | 'manual'
+let historySubtab = 'week';
+let monthSummaryCache = {}; // 'summary:YYYY-MM' -> {"01":{c,b,bud}, ...}
+let viewMonth = new Date(); viewMonth.setDate(1); // month currently shown in calendar
+let viewYear = new Date().getFullYear();
+let selectedDayKey = null;
+let dayEditor = null;          // {key:'YYYY-MM-DD', data:{foods,workouts,steps}} — a past day open for editing
+let editingFoodId = null;      // set while the food modal is editing an existing entry rather than adding a new one
+let editingWorkoutId = null;   // same, for the workout modal
+
+/* ---- pedometer state ---- */
+let pedoActive = false;        // sensor listener currently attached
+let pedoPending = false;       // wants to run but blocked (needs a tap, e.g. iOS permission gesture)
+let pedoGravity = 9.81;        // running low-pass estimate of gravity magnitude
+let pedoLastStepTime = 0;
+let pedoAboveThreshold = false;
+let pedoSaveTimer = null;
+let pedoUnsavedSteps = 0;      // steps accumulated since last persisted save
+let pedoAnyMotionReceived = false; // did we get at least one raw devicemotion event since starting?
+let pedoWatchGen = 0;          // bumped on every start/stop so stale silence-timeouts can no-op
+let pedoSilent = false;        // true once we've concluded the sensor isn't delivering events
+
+/* ===================== HELPERS ===================== */
+function pad(n){ return String(n).padStart(2,'0'); }
+function dateKey(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
+function todayKey(){ return dateKey(new Date()); }
+function fmt(n){ return Math.round(n).toLocaleString('ru-RU'); }
+function showToast(msg){
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.classList.add('show');
+  clearTimeout(showToast._h);
+  showToast._h = setTimeout(()=> t.classList.remove('show'), 2200);
+}
+async function storeGet(key){
+  try{
+    const v = localStorage.getItem('cal_'+key);
+    return v!==null ? JSON.parse(v) : null;
+  }catch(e){ return null; }
+}
+async function storeSet(key, val){
+  try{ localStorage.setItem('cal_'+key, JSON.stringify(val)); }catch(e){ console.error('storage set failed', e); }
+}
+
+/* ===================== TDEE ===================== */
+function calcBMR(p){
+  const s = p.gender === 'm' ? 5 : -161;
+  return 10*p.weight + 6.25*p.height - 5*p.age + s;
+}
+function calcTDEE(p){ return calcBMR(p) * p.activity; }
+function calcGoalCalories(p){
+  const tdee = calcTDEE(p);
+  if(p.goal === 'lose') return tdee * 0.8;
+  if(p.goal === 'gain') return tdee * 1.12;
+  return tdee;
+}
+
+/* ===================== VIEW SWITCH ===================== */
+async function switchView(tab){
+  await checkDayRollover();
+  currentTab = tab;
+  document.querySelectorAll('.view').forEach(v=>v.hidden = true);
+  document.getElementById('view-'+tab).hidden = false;
+  document.querySelectorAll('.navbtn').forEach(b=>b.classList.toggle('active', b.dataset.tab===tab));
+  if(tab === 'history') renderHistorySubtab();
+  if(tab === 'profile') fillProfileForm();
+}
+
+/* ===================== PEDOMETER MATH ===================== */
+function strideMeters(profile){
+  const heightCm = profile ? profile.height : 175;
+  return heightCm * 0.414 / 100; // common walking-stride approximation
+}
+function stepsDistanceM(steps, profile){ return steps * strideMeters(profile); }
+function stepsKcal(steps, weightKg){
+  const w = weightKg || 70;
+  return steps * w * 0.00057; // ~0.04 kcal/step at 70kg, scales with body weight
+}
+
+/* ===================== TODAY RENDER ===================== */
+function computeTotalsFor(dayObj){
+  const consumed = dayObj.foods.reduce((s,f)=>s+f.kcal,0);
+  const workoutBurn = dayObj.workouts.reduce((s,w)=>s+w.kcal,0);
+  const walkBurn = stepsKcal(dayObj.steps||0, profile ? profile.weight : 70);
+  const burned = workoutBurn + walkBurn;
+  const goalCalories = profile ? calcGoalCalories(profile) : 2000;
+  const budget = goalCalories + burned;
+  const remaining = budget - consumed;
+  return {consumed, burned, goalCalories, budget, remaining};
+}
+function computeTotals(){ return computeTotalsFor(today); }
+
+async function checkDayRollover(){
+  const key = todayKey();
+  if(currentDayKey !== null && key !== currentDayKey){
+    // date has rolled over while the app was open — archive old key stays as-is in storage,
+    // load (or create) a fresh entry for the new day.
+    const saved = await storeGet('day:'+key);
+    today = saved || {foods:[], workouts:[], steps:0};
+    today.steps = today.steps || 0;
+    currentDayKey = key;
+    historyCache = {}; // stale, dates shifted
+    if(currentTab === 'today') renderToday();
+    if(currentTab === 'history') renderHistorySubtab();
+    return true;
+  }
+  currentDayKey = key;
+  return false;
+}
+
+function renderToday(){
+  const d = new Date();
+  const dateStr = d.toLocaleDateString('ru-RU', {weekday:'long', day:'numeric', month:'long'});
+  document.getElementById('today-date').textContent = dateStr.charAt(0).toUpperCase()+dateStr.slice(1);
+
+  const {consumed, burned, budget, remaining} = computeTotals();
+  const pct = budget > 0 ? consumed / budget : 0;
+
+  const r = 94, circ = 2*Math.PI*r;
+  const ring = document.getElementById('ring-fg');
+  const shown = Math.min(pct, 1);
+  ring.style.strokeDasharray = circ;
+  ring.style.strokeDashoffset = circ * (1 - shown);
+
+  let grad = 'url(#gradGood)', statusText = 'Всё по плану', statusColor = 'rgba(143,209,79,0.18)', statusFg = 'var(--good)';
+  if(pct >= 0.8 && pct < 1.0){ grad='url(#gradWarn)'; statusText='Почти у цели'; statusColor='rgba(255,138,98,0.16)'; statusFg='var(--burn)'; }
+  if(pct >= 1.0){ grad='url(#gradOver)'; statusText='Перебор бюджета'; statusColor='rgba(255,92,122,0.16)'; statusFg='var(--over)'; }
+  ring.style.stroke = grad;
+
+  const big = document.getElementById('ring-big');
+  const lbl = document.getElementById('ring-lbl');
+  if(remaining >= 0){ big.textContent = fmt(remaining); lbl.textContent = 'осталось ккал'; }
+  else{ big.textContent = fmt(Math.abs(remaining)); lbl.textContent = 'перебор, ккал'; }
+  const st = document.getElementById('ring-status');
+  st.textContent = statusText; st.style.background = statusColor; st.style.color = statusFg;
+
+  document.getElementById('chip-budget').textContent = fmt(budget);
+  document.getElementById('chip-eaten').textContent = fmt(consumed);
+  document.getElementById('chip-burned').textContent = fmt(burned);
+
+  renderPedometer();
+
+  renderFoodList(document.getElementById('food-list'), today.foods, 'today');
+  renderWorkoutList(document.getElementById('workout-list'), today.workouts, 'today');
+}
+
+function renderFoodList(container, foods, mode){
+  if(foods.length===0){
+    container.innerHTML = `<div class="empty-hint">Пока ничего не добавлено. Нажми «Добавить», чтобы записать первый приём пищи.</div>`;
+    return;
+  }
+  container.innerHTML = foods.slice().reverse().map(f=>`
+    <div class="entry food" onclick="editFoodEntry('${f.id}','${mode}')">
+      <div class="ico">🍽️</div>
+      <div class="info">
+        <div class="name">${escapeHtml(f.name)}</div>
+        <div class="sub">${f.grams} г · ${f.time}</div>
+      </div>
+      <div class="kcal">${fmt(f.kcal)}</div>
+      <button class="del" onclick="event.stopPropagation(); deleteFood('${f.id}')">✕</button>
+    </div>`).join('');
+}
+
+function renderWorkoutList(container, workouts, mode){
+  if(workouts.length===0){
+    container.innerHTML = `<div class="empty-hint">Тренировок пока нет. Добавь активность, чтобы расширить бюджет.</div>`;
+    return;
+  }
+  container.innerHTML = workouts.slice().reverse().map(w=>`
+    <div class="entry workout" onclick="editWorkoutEntry('${w.id}','${mode}')">
+      <div class="ico">🔥</div>
+      <div class="info">
+        <div class="name">${escapeHtml(w.name)}</div>
+        <div class="sub">${w.minutes ? w.minutes+' мин · ' : ''}${w.time}</div>
+      </div>
+      <div class="kcal">-${fmt(w.kcal)}</div>
+      <button class="del" onclick="event.stopPropagation(); deleteWorkout('${w.id}')">✕</button>
+    </div>`).join('');
+}
+
+function escapeHtml(s){ return s.replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+
+/* ===================== PEDOMETER ===================== */
+function renderPedometer(){
+  const steps = today.steps || 0;
+  const dist = stepsDistanceM(steps, profile);
+  const kcal = stepsKcal(steps, profile ? profile.weight : 70);
+  document.getElementById('pedo-steps').textContent = fmt(steps);
+  document.getElementById('pedo-distance').textContent = (dist/1000).toLocaleString('ru-RU', {minimumFractionDigits:1, maximumFractionDigits:1}) + ' км';
+  document.getElementById('pedo-kcal').textContent = fmt(kcal) + ' ккал';
+
+  const dot = document.getElementById('pedo-dot');
+  const lbl = document.getElementById('pedo-toggle-lbl');
+  const note = document.getElementById('pedo-note');
+  dot.classList.remove('active','pending');
+  if(pedoActive && pedoNative){
+    dot.classList.add('active');
+    lbl.textContent = 'Остановить';
+    note.textContent = 'Фоновый шагомер активен — считает шаги даже при выключенном экране и закрытом приложении.';
+  } else if(pedoActive && pedoSilent){
+    dot.classList.add('pending');
+    lbl.textContent = 'Остановить';
+    note.textContent = 'Датчик не отвечает. Открой настройки сайта в браузере → Датчики движения → Разрешить, затем перезапусти шагомер.';
+  } else if(pedoActive){
+    dot.classList.add('active');
+    lbl.textContent = 'Остановить';
+    note.textContent = 'Шагомер активен — считает шаги, пока приложение открыто на экране.';
+  } else if(pedoPending){
+    dot.classList.add('pending');
+    lbl.textContent = 'Возобновить';
+    note.textContent = 'Нажми, чтобы возобновить подсчёт (нужно одно касание для разрешения на датчики движения).';
+  } else if(nativePedometerAvailable()){
+    lbl.textContent = 'Запустить';
+    note.textContent = 'Запусти, чтобы шагомер считал шаги в фоне — даже при выключенном экране и закрытом приложении.';
+  } else {
+    lbl.textContent = 'Запустить';
+    note.textContent = 'Считает шаги, пока приложение открыто на экране. Полный фоновый подсчёт недоступен веб-приложениям на Android.';
+  }
+}
+
+function pedoRegisterStep(){
+  today.steps = (today.steps||0) + 1;
+  pedoUnsavedSteps++;
+  // Update the live numbers immediately for responsiveness...
+  document.getElementById('pedo-steps').textContent = fmt(today.steps);
+  const dist = stepsDistanceM(today.steps, profile);
+  const kcal = stepsKcal(today.steps, profile ? profile.weight : 70);
+  document.getElementById('pedo-distance').textContent = (dist/1000).toLocaleString('ru-RU', {minimumFractionDigits:1, maximumFractionDigits:1}) + ' км';
+  document.getElementById('pedo-kcal').textContent = fmt(kcal) + ' ккал';
+  // ...but only refresh the ring/chips + persist to storage every few steps (throttled) to avoid excess writes.
+  if(pedoUnsavedSteps >= 5){ pedoFlush(); }
+  else {
+    clearTimeout(pedoSaveTimer);
+    pedoSaveTimer = setTimeout(pedoFlush, 3000);
+  }
+}
+
+async function pedoFlush(){
+  clearTimeout(pedoSaveTimer);
+  pedoSaveTimer = null;
+  pedoUnsavedSteps = 0;
+  await checkDayRollover();
+  await storeSet('day:'+todayKey(), today);
+  await updateMonthSummaryForDate(currentDayKey, computeTotals());
+  renderToday(); // full refresh: ring/budget need to reflect the extra burned calories too
+}
+
+function pedoHandleMotion(event){
+  const acc = event.accelerationIncludingGravity;
+  if(!acc || acc.x===null || acc.x===undefined) return;
+  const mag = Math.sqrt(acc.x*acc.x + acc.y*acc.y + acc.z*acc.z);
+  if(!mag || isNaN(mag)) return;
+  pedoAnyMotionReceived = true;
+  pedoGravity = pedoGravity*0.85 + mag*0.15; // slow-moving low-pass estimate of "gravity baseline"
+  const delta = mag - pedoGravity;
+  const now = Date.now();
+  const STEP_THRESHOLD = 1.15;      // m/s^2 above baseline to register the peak of a step
+  const RESET_THRESHOLD = 0.55;     // must dip back below this before the next step can count
+  const MIN_STEP_INTERVAL = 280;    // ms — debounce so one physical step isn't counted twice
+
+  if(delta > STEP_THRESHOLD && !pedoAboveThreshold && (now - pedoLastStepTime) > MIN_STEP_INTERVAL){
+    pedoAboveThreshold = true;
+    pedoLastStepTime = now;
+    pedoRegisterStep();
+  } else if(delta < RESET_THRESHOLD){
+    pedoAboveThreshold = false;
+  }
+}
+
+/* ---- native bridge: when this app is wrapped with Capacitor (a real installed Android app,
+   not just a browser tab), a native plugin gives us TRUE background step counting via the
+   phone's hardware sensor + a foreground service. A plain browser/PWA can never do this — see
+   pedoHandleMotion() below for the best-effort fallback used everywhere else. ---- */
+function nativePedometerAvailable(){
+  return !!(window.Capacitor && window.Capacitor.isNativePlatform && window.Capacitor.isNativePlatform()
+    && window.Capacitor.Plugins && window.Capacitor.Plugins.Pedometer);
+}
+let pedoNative = false;
+let pedoPollTimer = null;
+
+async function pedoNativePoll(){
+  try{
+    const { steps } = await window.Capacitor.Plugins.Pedometer.getSteps();
+    if(typeof steps === 'number' && steps !== today.steps){
+      today.steps = steps; // the native service is authoritative — replace, don't add
+      pedoUnsavedSteps++;
+      renderPedometer();
+      if(currentTab === 'today'){
+        document.getElementById('chip-burned').textContent = fmt(computeTotals().burned);
+      }
+      await pedoFlush();
+    }
+  }catch(e){ /* plugin call failed — next poll will retry */ }
+}
+
+async function startPedometer(){
+  if(pedoActive) return;
+
+  if(nativePedometerAvailable()){
+    try{
+      const perm = await window.Capacitor.Plugins.Pedometer.requestPermissions();
+      if(!perm.granted){
+        showToast('Доступ к датчику шагов не разрешён в настройках телефона');
+        return;
+      }
+      await window.Capacitor.Plugins.Pedometer.start();
+      pedoActive = true;
+      pedoNative = true;
+      pedoPending = false;
+      pedoSilent = false;
+      localStorage.setItem('cal_pedo_enabled', 'true');
+      renderPedometer();
+      clearInterval(pedoPollTimer);
+      pedoPollTimer = setInterval(pedoNativePoll, 5000);
+      pedoNativePoll();
+    }catch(e){
+      showToast('Не удалось запустить фоновый шагомер');
+    }
+    return;
+  }
+
+  // --- Browser/PWA fallback: foreground-only accelerometer heuristic ---
+  if(typeof DeviceMotionEvent === 'undefined'){
+    showToast('Датчики движения недоступны на этом устройстве');
+    return;
+  }
+  // iOS 13+ requires an explicit permission prompt fired from a real user gesture.
+  if(typeof DeviceMotionEvent.requestPermission === 'function'){
+    try{
+      const res = await DeviceMotionEvent.requestPermission();
+      if(res !== 'granted'){
+        pedoPending = false; pedoActive = false;
+        localStorage.setItem('cal_pedo_enabled', 'false');
+        renderPedometer();
+        showToast('Доступ к датчикам движения не разрешён');
+        return;
+      }
+    }catch(e){
+      // requestPermission threw — most likely called without a user gesture (e.g. auto-resume on load).
+      pedoPending = true; pedoActive = false;
+      renderPedometer();
+      return;
+    }
+  }
+  window.addEventListener('devicemotion', pedoHandleMotion);
+  pedoActive = true;
+  pedoNative = false;
+  pedoPending = false;
+  pedoGravity = 9.81;
+  pedoAboveThreshold = false;
+  pedoAnyMotionReceived = false;
+  pedoSilent = false;
+  localStorage.setItem('cal_pedo_enabled', 'true');
+  renderPedometer();
+
+  // If the browser never delivers a single devicemotion event within a few seconds,
+  // the sensor is almost certainly blocked (site permission, OS-level toggle, or unsupported
+  // browser) — let the person know instead of leaving them staring at a counter that never moves.
+  const startedAtGen = ++pedoWatchGen;
+  setTimeout(()=>{
+    if(pedoWatchGen !== startedAtGen) return; // pedometer was stopped/restarted since — ignore stale check
+    if(pedoActive && !pedoAnyMotionReceived){
+      pedoSilent = true;
+      showToast('Датчик движения не отвечает — проверь разрешение «Датчики движения» для сайта в настройках браузера');
+      renderPedometer();
+    }
+  }, 4000);
+}
+
+function stopPedometer(){
+  if(pedoNative && nativePedometerAvailable()){
+    window.Capacitor.Plugins.Pedometer.stop().catch(()=>{});
+    clearInterval(pedoPollTimer);
+    pedoPollTimer = null;
+  }
+  window.removeEventListener('devicemotion', pedoHandleMotion);
+  pedoActive = false;
+  pedoNative = false;
+  pedoPending = false;
+  pedoWatchGen++;
+  localStorage.setItem('cal_pedo_enabled', 'false');
+  if(pedoUnsavedSteps > 0) pedoFlush();
+  renderPedometer();
+}
+
+function togglePedometer(){
+  if(pedoActive) stopPedometer();
+  else startPedometer();
+}
+
+async function saveTodayAndRender(){
+  await checkDayRollover();
+  await storeSet('day:'+todayKey(), today);
+  await updateMonthSummaryForDate(currentDayKey, computeTotals());
+  renderToday();
+}
+
+async function updateMonthSummaryForDate(dateKeyStr, totals){
+  const [y,m,dd] = dateKeyStr.split('-');
+  const monthKey = `summary:${y}-${m}`;
+  let summary = monthSummaryCache[monthKey];
+  if(!summary){ summary = (await storeGet(monthKey)) || {}; }
+  const dayObj = dateKeyStr===currentDayKey ? today : (dayEditor && dayEditor.key===dateKeyStr ? dayEditor.data : null);
+  const hasEntries = dayObj ? (dayObj.foods.length>0 || dayObj.workouts.length>0 || (dayObj.steps||0)>0) : true;
+  if(!hasEntries){
+    delete summary[dd];
+  } else {
+    summary[dd] = {c: Math.round(totals.consumed), b: Math.round(totals.burned), bud: Math.round(totals.budget)};
+  }
+  monthSummaryCache[monthKey] = summary;
+  await storeSet(monthKey, summary);
+}
+
+async function getMonthSummary(y, m){ // m: 1-12
+  const monthKey = `summary:${y}-${pad(m)}`;
+  if(monthSummaryCache[monthKey]) return monthSummaryCache[monthKey];
+  const s = (await storeGet(monthKey)) || {};
+  monthSummaryCache[monthKey] = s;
+  return s;
+}
+
+/* ---- shared add-target: lets the same food/workout modals write into either
+   today's live data, or an arbitrary past day opened in the day editor ---- */
+let addTargetMode = 'today'; // 'today' | 'dayeditor'
+function currentAddTarget(){
+  return addTargetMode === 'dayeditor' && dayEditor ? dayEditor.data : today;
+}
+async function persistAddTarget(){
+  if(addTargetMode === 'dayeditor' && dayEditor){
+    await saveDayEditorAndRender();
+  } else {
+    await saveTodayAndRender();
+  }
+}
+
+function deleteFood(id){
+  const t = currentAddTarget();
+  t.foods = t.foods.filter(f=>f.id!==id);
+  persistAddTarget();
+}
+function deleteWorkout(id){
+  const t = currentAddTarget();
+  t.workouts = t.workouts.filter(w=>w.id!==id);
+  persistAddTarget();
+}
+
+/* ===================== HISTORY ===================== */
+function setHistorySubtab(tab){
+  historySubtab = tab;
+  ['week','month','year'].forEach(t=>{
+    document.getElementById('hsub-'+t).classList.toggle('on', t===tab);
+    document.getElementById('hist-'+t+'-view').style.display = (t===tab) ? 'block' : 'none';
+  });
+  const eyebrow = {week:'неделя', month:'месяц', year:'год'}[tab];
+  document.getElementById('hist-eyebrow').textContent = eyebrow;
+  renderHistorySubtab();
+}
+
+function renderHistorySubtab(){
+  if(historySubtab === 'week') renderWeekView();
+  if(historySubtab === 'month') renderMonthView();
+  if(historySubtab === 'year') renderYearView();
+}
+
+async function renderWeekView(){
+  const container = document.getElementById('week-bars');
+  const days = [];
+  for(let i=6;i>=0;i--){
+    const d = new Date(); d.setDate(d.getDate()-i);
+    days.push(d);
+  }
+  const goalCalories = profile ? calcGoalCalories(profile) : 2000;
+  const results = [];
+  for(const d of days){
+    const key = dateKey(d);
+    let data;
+    if(key === todayKey()) data = today;
+    else if(historyCache[key]) data = historyCache[key];
+    else { data = (await storeGet('day:'+key)) || {foods:[],workouts:[],steps:0}; historyCache[key]=data; }
+    const consumed = (data.foods||[]).reduce((s,f)=>s+f.kcal,0);
+    const burned = (data.workouts||[]).reduce((s,w)=>s+w.kcal,0) + stepsKcal(data.steps||0, profile ? profile.weight : 70);
+    const budget = goalCalories + burned;
+    results.push({d, consumed, burned, budget, remaining: budget-consumed});
+  }
+
+  const maxAbs = Math.max(...results.map(r=>Math.abs(r.remaining)), goalCalories*0.15, 200);
+  const weekdays = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+
+  let html = '<div class="baseline"></div>';
+  results.forEach(r=>{
+    const isToday = dateKey(r.d) === todayKey();
+    const hpx = Math.min(100, Math.abs(r.remaining)/maxAbs*100);
+    const color = r.remaining >= 0 ? 'linear-gradient(180deg, var(--good), #5FAE33)' : 'linear-gradient(180deg, var(--over), #E23D5C)';
+    html += `<div class="bar-col ${isToday?'today':''}">
+      <div class="bar-track" style="align-items:flex-end;">
+        <div class="bar-fill" style="height:${hpx}%; background:${color};"></div>
+      </div>
+      <div class="dlabel">${weekdays[r.d.getDay()]}</div>
+    </div>`;
+  });
+  container.innerHTML = html;
+
+  const avg = results.reduce((s,r)=>s+r.remaining,0)/results.length;
+  document.getElementById('hist-avg').textContent = (avg>=0?'+':'') + fmt(avg);
+  const okDays = results.filter(r=>r.remaining>=0).length;
+  document.getElementById('hist-days-ok').textContent = okDays+'/7';
+}
+
+/* ---- month calendar ---- */
+const MONTH_NAMES = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
+const MONTH_NAMES_SHORT = ['янв','фев','мар','апр','май','июн','июл','авг','сен','окт','ноя','дек'];
+
+function dayColor(remaining, budget){
+  if(!budget || budget<=0) return null;
+  const ratio = Math.min(1, Math.abs(remaining)/budget);
+  const alpha = (0.32 + ratio*0.6).toFixed(2);
+  return remaining >= 0 ? `rgba(143,209,79,${alpha})` : `rgba(255,92,122,${alpha})`;
+}
+
+function shiftMonth(delta){
+  viewMonth.setMonth(viewMonth.getMonth()+delta);
+  selectedDayKey = null;
+  document.getElementById('day-detail').classList.remove('show');
+  renderMonthView();
+}
+
+async function renderMonthView(){
+  const y = viewMonth.getFullYear(), m = viewMonth.getMonth()+1; // 1-12
+  document.getElementById('cal-month-title').textContent = `${MONTH_NAMES[m-1]} ${y}`;
+
+  const summary = await getMonthSummary(y,m);
+
+  const daysInMonth = new Date(y, m, 0).getDate();
+  const firstDow = (new Date(y, m-1, 1).getDay() + 6) % 7; // Mon=0
+  const grid = document.getElementById('cal-grid');
+  let html = '';
+  for(let i=0;i<firstDow;i++) html += `<div class="cal-cell empty"></div>`;
+
+  const tKey = todayKey();
+  for(let day=1; day<=daysInMonth; day++){
+    const dd = pad(day);
+    const key = `${y}-${pad(m)}-${dd}`;
+    const isToday = key === tKey;
+    const isFuture = key > tKey;
+    let entry = summary[dd];
+    if(isToday){
+      const {consumed,burned,budget} = computeTotals();
+      if(today.foods.length>0 || today.workouts.length>0) entry = {c:Math.round(consumed), b:Math.round(burned), bud:Math.round(budget)};
+    }
+    let style = '', cls = 'nodata';
+    if(isFuture && !isToday){ cls='future'; }
+    else if(entry){
+      const remaining = entry.bud - entry.c;
+      const color = dayColor(remaining, entry.bud);
+      if(color){ style = `background:${color};`; cls=''; }
+    }
+    html += `<div class="cal-cell ${cls} ${isToday?'is-today':''} ${selectedDayKey===key?'selected':''}" style="${style}" onclick="selectDay('${key}')">${day}</div>`;
+  }
+  grid.innerHTML = html;
+
+  if(selectedDayKey) showDayDetail(selectedDayKey, summary);
+}
+
+async function selectDay(key){
+  selectedDayKey = key;
+  const [y,m] = key.split('-');
+  const summary = await getMonthSummary(y, parseInt(m));
+  renderMonthView();
+  showDayDetail(key, summary);
+}
+
+function showDayDetail(key, summary){
+  const [y,m,dd] = key.split('-');
+  const panel = document.getElementById('day-detail');
+  let entry = summary[dd];
+  if(key === todayKey()){
+    const {consumed,burned,budget} = computeTotals();
+    if(today.foods.length>0 || today.workouts.length>0) entry = {c:Math.round(consumed), b:Math.round(burned), bud:Math.round(budget)};
+  }
+  const d = new Date(parseInt(y), parseInt(m)-1, parseInt(dd));
+  const title = d.toLocaleDateString('ru-RU', {day:'numeric', month:'long', year:'numeric'});
+  const isFuture = key > todayKey();
+  const editBtn = isFuture ? '' : `<button class="dd-edit-btn" onclick="openDayEditor('${key}')">✏️ Редактировать день</button>`;
+  if(!entry){
+    panel.innerHTML = `<div class="dd-title">${title}</div><div class="dd-row">Нет записей за этот день</div>${editBtn}`;
+  } else {
+    const remaining = entry.bud - entry.c;
+    panel.innerHTML = `
+      <div class="dd-title">${title}</div>
+      <div class="dd-row"><span>Бюджет</span><b>${fmt(entry.bud)}</b></div>
+      <div class="dd-row"><span>Съедено</span><b>${fmt(entry.c)}</b></div>
+      <div class="dd-row"><span>Сожжено</span><b>${fmt(entry.b)}</b></div>
+      <div class="dd-row"><span>Баланс</span><b style="color:${remaining>=0?'var(--good)':'var(--over)'}">${remaining>=0?'+':''}${fmt(remaining)}</b></div>
+      ${editBtn}
+    `;
+  }
+  panel.classList.add('show');
+}
+
+/* ---- day editor: backfill / correct any past (or today's) day ---- */
+async function openDayEditor(key){
+  if(key === todayKey()){
+    // Today already has full editing on its own tab — no need for a separate editor.
+    switchView('today');
+    return;
+  }
+  const data = (await storeGet('day:'+key)) || {foods:[], workouts:[], steps:0};
+  data.foods = data.foods || [];
+  data.workouts = data.workouts || [];
+  data.steps = data.steps || 0;
+  dayEditor = {key, data};
+  addTargetMode = 'dayeditor';
+
+  const [y,m,dd] = key.split('-');
+  const d = new Date(parseInt(y), parseInt(m)-1, parseInt(dd));
+  const title = d.toLocaleDateString('ru-RU', {day:'numeric', month:'long', year:'numeric'});
+  document.getElementById('dayedit-title').textContent = title;
+
+  document.getElementById('overlay-dayedit').classList.add('show');
+  renderDayEditor();
+}
+
+function closeDayEditor(){
+  document.getElementById('overlay-dayedit').classList.remove('show');
+  dayEditor = null;
+  addTargetMode = 'today';
+}
+
+function renderDayEditor(){
+  if(!dayEditor) return;
+  const totals = computeTotalsFor(dayEditor.data);
+  document.getElementById('dayedit-summary').innerHTML = `
+    <div class="stat-card"><div class="v">${fmt(totals.budget)}</div><div class="k">Бюджет</div></div>
+    <div class="stat-card"><div class="v" style="color:var(--intake)">${fmt(totals.consumed)}</div><div class="k">Съедено</div></div>
+    <div class="stat-card"><div class="v" style="color:${totals.remaining>=0?'var(--good)':'var(--over)'}">${totals.remaining>=0?'+':''}${fmt(totals.remaining)}</div><div class="k">Баланс</div></div>
+  `;
+  document.getElementById('dayedit-steps-input').value = dayEditor.data.steps || 0;
+  renderFoodList(document.getElementById('dayedit-food-list'), dayEditor.data.foods, 'dayeditor');
+  renderWorkoutList(document.getElementById('dayedit-workout-list'), dayEditor.data.workouts, 'dayeditor');
+}
+
+function updateDayEditorSteps(){
+  if(!dayEditor) return;
+  const v = parseInt(document.getElementById('dayedit-steps-input').value) || 0;
+  dayEditor.data.steps = Math.max(0, v);
+  saveDayEditorAndRender();
+}
+
+async function saveDayEditorAndRender(){
+  if(!dayEditor) return;
+  await storeSet('day:'+dayEditor.key, dayEditor.data);
+  await updateMonthSummaryForDate(dayEditor.key, computeTotalsFor(dayEditor.data));
+  renderDayEditor();
+
+  // Keep the calendar underneath in sync (colour/detail panel for the day we just edited).
+  if(historySubtab === 'month') await renderMonthView();
+  if(historySubtab === 'year') await renderYearView();
+  if(selectedDayKey === dayEditor.key){
+    const [y,m] = dayEditor.key.split('-');
+    const summary = await getMonthSummary(y, parseInt(m));
+    showDayDetail(dayEditor.key, summary);
+  }
+}
+
+
+function shiftYear(delta){
+  viewYear += delta;
+  renderYearView();
+}
+
+async function renderYearView(){
+  document.getElementById('cal-year-title').textContent = String(viewYear);
+
+  const monthSummaries = await Promise.all(
+    Array.from({length:12}, (_,i)=>getMonthSummary(viewYear, i+1))
+  );
+  if(viewYear === new Date().getFullYear() && currentDayKey){
+    const curM = new Date().getMonth();
+    const {consumed,burned,budget} = computeTotals();
+    if(today.foods.length>0 || today.workouts.length>0){
+      monthSummaries[curM] = {...monthSummaries[curM], [pad(new Date().getDate())]: {c:Math.round(consumed), b:Math.round(burned), bud:Math.round(budget)}};
+    }
+  }
+
+  const jan1 = new Date(viewYear,0,1);
+  const startDow = (jan1.getDay()+6)%7;
+  const start = new Date(jan1); start.setDate(jan1.getDate()-startDow);
+  const end = new Date(viewYear,11,31);
+  const days = [];
+  let cur = new Date(start);
+  while(cur <= end){ days.push(new Date(cur)); cur.setDate(cur.getDate()+1); }
+  while(days.length % 7 !== 0){ days.push(new Date(cur)); cur.setDate(cur.getDate()+1); }
+
+  const tKey = todayKey();
+  let cellsHtml = '';
+  let sumRemaining = 0, sumCount = 0, okCount = 0;
+  const monthLabelCols = [];
+  let lastMonthSeen = -1;
+
+  days.forEach((d, idx)=>{
+    const col = Math.floor(idx/7);
+    const inYear = d.getFullYear() === viewYear;
+    const key = dateKey(d);
+    if(inYear && d.getMonth() !== lastMonthSeen){ lastMonthSeen = d.getMonth(); monthLabelCols.push({m:d.getMonth(), col}); }
+    if(!inYear){ cellsHtml += `<div class="year-cell" style="background:transparent;"></div>`; return; }
+    if(key > tKey){ cellsHtml += `<div class="year-cell future"></div>`; return; }
+    const dd = pad(d.getDate());
+    const ms = monthSummaries[d.getMonth()] || {};
+    const entry = ms[dd];
+    if(!entry){ cellsHtml += `<div class="year-cell" title="${key}: нет данных"></div>`; return; }
+    const remaining = entry.bud - entry.c;
+    sumRemaining += remaining; sumCount++;
+    if(remaining>=0) okCount++;
+    const color = dayColor(remaining, entry.bud) || 'var(--surface2)';
+    cellsHtml += `<div class="year-cell" style="background:${color};" title="${key}: ${remaining>=0?'+':''}${Math.round(remaining)} ккал"></div>`;
+  });
+
+  document.getElementById('year-grid').innerHTML = cellsHtml;
+  document.getElementById('year-labels').innerHTML = monthLabelCols.map(x=>
+    `<span style="grid-column:${x.col+1}">${MONTH_NAMES_SHORT[x.m]}</span>`).join('');
+
+  const avg = sumCount ? sumRemaining/sumCount : 0;
+  document.getElementById('year-avg').textContent = (avg>=0?'+':'') + fmt(avg);
+  document.getElementById('year-days-ok').textContent = `${okCount}/${sumCount}`;
+}
+
+/* ===================== PROFILE ===================== */
+function setGender(g){ genderVal=g; updateSegUI(); updateTdeePreview(); }
+function setActivity(a){ activityVal=a; updateSegUI(); updateTdeePreview(); }
+function setGoal(g){ goalVal=g; updateSegUI(); updateTdeePreview(); }
+
+function updateSegUI(){
+  document.getElementById('seg-m').classList.toggle('on', genderVal==='m');
+  document.getElementById('seg-f').classList.toggle('on', genderVal==='f');
+  [1.2,1.375,1.55,1.725,1.9].forEach((a,i)=>{
+    document.getElementById('seg-a'+(i+1)).classList.toggle('on', activityVal===a);
+  });
+  ['lose','maintain','gain'].forEach(g=>{
+    document.getElementById('seg-'+g).classList.toggle('on', goalVal===g);
+  });
+}
+
+function readProfileForm(){
+  return {
+    gender: genderVal,
+    age: parseFloat(document.getElementById('in-age').value) || 28,
+    weight: parseFloat(document.getElementById('in-weight').value) || 70,
+    height: parseFloat(document.getElementById('in-height').value) || 175,
+    activity: activityVal,
+    goal: goalVal
+  };
+}
+
+function updateTdeePreview(){
+  const p = readProfileForm();
+  const cal = calcGoalCalories(p);
+  document.getElementById('profile-tdee-preview').textContent = fmt(cal) + ' ккал';
+}
+
+function fillProfileForm(){
+  if(profile){
+    genderVal = profile.gender; activityVal = profile.activity; goalVal = profile.goal;
+    document.getElementById('in-age').value = profile.age;
+    document.getElementById('in-weight').value = profile.weight;
+    document.getElementById('in-height').value = profile.height;
+  }
+  updateSegUI();
+  updateTdeePreview();
+}
+
+async function saveProfile(){
+  profile = readProfileForm();
+  await storeSet('profile', profile);
+  showToast('Профиль сохранён');
+  switchView('today');
+}
+
+['in-age','in-weight','in-height'].forEach(id=>{
+  document.addEventListener('DOMContentLoaded', ()=>{
+    const el = document.getElementById(id);
+    if(el) el.addEventListener('input', updateTdeePreview);
+  });
+});
+
+/* ===================== FOOD MODAL ===================== */
+function openFoodModal(){
+  editingFoodId = null;
+  document.getElementById('food-modal-title').textContent = 'Добавить еду';
+  document.getElementById('overlay-food').classList.add('show');
+  document.getElementById('food-search').value='';
+  document.getElementById('food-suggest').innerHTML='';
+  document.getElementById('food-online-row').style.display='none';
+  document.getElementById('food-selected').style.display='none';
+  foodSelectedName = null;
+  setTimeout(()=>document.getElementById('food-search').focus(), 300);
+}
+function closeFoodModal(){
+  document.getElementById('overlay-food').classList.remove('show');
+  editingFoodId = null;
+}
+
+function editFoodEntry(id, mode){
+  addTargetMode = mode;
+  const entry = currentAddTarget().foods.find(f=>f.id===id);
+  if(!entry) return;
+  document.getElementById('overlay-food').classList.add('show');
+  document.getElementById('food-modal-title').textContent = 'Редактировать запись';
+  document.getElementById('food-search').value='';
+  document.getElementById('food-suggest').innerHTML='';
+  document.getElementById('food-online-row').style.display='none';
+  editingFoodId = id;
+  selectFood(entry.name, entry.kcal100g);
+  document.getElementById('food-grams').value = entry.grams;
+  updateFoodPreview();
+}
+
+function allFoods(){
+  return [...FOOD_DB, ...customFoods.map(f=>[f.name, f.kcal100g])];
+}
+
+function onFoodSearch(){
+  const q = document.getElementById('food-search').value.trim().toLowerCase();
+  const list = document.getElementById('food-suggest');
+  const onlineRow = document.getElementById('food-online-row');
+  if(q.length < 2){ list.innerHTML=''; onlineRow.style.display='none'; return; }
+  const matches = allFoods().filter(([n])=>n.toLowerCase().includes(q)).slice(0,7);
+  if(matches.length===0){
+    list.innerHTML = `<div class="empty-hint">Совпадений в базе не найдено</div>`;
+    onlineRow.style.display='flex';
+  } else {
+    list.innerHTML = matches.map(([n,k])=>`
+      <div class="suggest-item" onclick='selectFood(${JSON.stringify(n)}, ${k})'>
+        <div class="n">${escapeHtml(n)}</div>
+        <div class="k">${k} ккал/100г</div>
+      </div>`).join('');
+    onlineRow.style.display='flex';
+  }
+}
+
+function selectFood(name, kcal100g){
+  foodSelectedName = name;
+  document.getElementById('food-selected-name').textContent = name;
+  document.getElementById('food-kcal100').value = kcal100g;
+  document.getElementById('food-grams').value = 100;
+  document.getElementById('food-selected').style.display='block';
+  updateFoodPreview();
+  const foodSelBox = document.getElementById('food-selected');
+  if(foodSelBox.scrollIntoView) foodSelBox.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+function manualFoodEntry(){
+  const q = document.getElementById('food-search').value.trim();
+  selectFood(q || 'Продукт', 0);
+  document.getElementById('food-kcal100').value = '';
+  document.getElementById('food-kcal100').focus();
+}
+
+function updateFoodPreview(){
+  const k100 = parseFloat(document.getElementById('food-kcal100').value) || 0;
+  const g = parseFloat(document.getElementById('food-grams').value) || 0;
+  document.getElementById('food-preview-kcal').textContent = fmt(k100*g/100);
+}
+
+async function searchFoodOnlineHandler(){
+  const q = document.getElementById('food-search').value.trim();
+  if(!q) return;
+  const btn = document.getElementById('btn-search-online');
+  const origHtml = btn.innerHTML;
+  btn.innerHTML = '<div class="spinner"></div> Ищу…';
+  try{
+    const resp = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "claude-sonnet-4-6",
+        max_tokens: 1000,
+        tools: [{ type: "web_search_20250305", name: "web_search" }],
+        messages: [{
+          role: "user",
+          content: `Найди в интернете калорийность продукта "${q}" (ккал на 100 грамм, для сырого/стандартного вида продукта, если не указано иное). В самом конце ответа выведи ТОЛЬКО одну строку в формате чистого JSON без markdown-разметки и без пояснений: {"name":"нормализованное короткое название на русском","kcal100g":число}`
+        }]
+      })
+    });
+    const data = await resp.json();
+    const textBlocks = (data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n');
+    const match = textBlocks.match(/\{[^{}]*"kcal100g"[^{}]*\}/);
+    if(!match) throw new Error('no json found');
+    const parsed = JSON.parse(match[0]);
+    if(!parsed.kcal100g || isNaN(parsed.kcal100g)) throw new Error('bad value');
+    selectFood(parsed.name || q, Math.round(parsed.kcal100g));
+    const exists = customFoods.some(f=>f.name.toLowerCase()===(parsed.name||q).toLowerCase());
+    if(!exists){
+      customFoods.push({name: parsed.name || q, kcal100g: Math.round(parsed.kcal100g)});
+      await storeSet('custom_foods', customFoods);
+    }
+    showToast('Найдено в интернете');
+  }catch(e){
+    console.error(e);
+    showToast('Не удалось найти онлайн, введите вручную');
+    manualFoodEntry();
+  }finally{
+    btn.innerHTML = origHtml;
+  }
+}
+
+async function confirmAddFood(){
+  const name = foodSelectedName || document.getElementById('food-selected-name').textContent;
+  const k100 = parseFloat(document.getElementById('food-kcal100').value) || 0;
+  const g = parseFloat(document.getElementById('food-grams').value) || 0;
+  if(g<=0){ showToast('Укажите граммы'); return; }
+  const kcal = Math.round(k100*g/100);
+  const target = currentAddTarget();
+
+  if(editingFoodId){
+    const entry = target.foods.find(f=>f.id===editingFoodId);
+    if(entry){ entry.name=name; entry.grams=g; entry.kcal100g=k100; entry.kcal=kcal; }
+    editingFoodId = null;
+  } else {
+    target.foods.push({
+      id: Date.now()+'-'+Math.random().toString(36).slice(2,7),
+      name, grams: g, kcal100g: k100, kcal,
+      time: new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})
+    });
+  }
+  const exists = customFoods.some(f=>f.name.toLowerCase()===name.toLowerCase());
+  if(!exists && k100>0){
+    customFoods.push({name, kcal100g: k100});
+    await storeSet('custom_foods', customFoods);
+  }
+  await persistAddTarget();
+  closeFoodModal();
+  showToast('Сохранено: '+name);
+}
+
+/* ===================== WORKOUT MODAL ===================== */
+function openWorkoutModal(){
+  editingWorkoutId = null;
+  document.getElementById('workout-modal-title').textContent = 'Добавить тренировку';
+  document.getElementById('overlay-workout').classList.add('show');
+  document.getElementById('workout-search').value='';
+  document.getElementById('workout-suggest').innerHTML='';
+  document.getElementById('workout-selected').style.display='none';
+  workoutSelectedName = null;
+  setTimeout(()=>document.getElementById('workout-search').focus(), 300);
+}
+function closeWorkoutModal(){
+  document.getElementById('overlay-workout').classList.remove('show');
+  editingWorkoutId = null;
+}
+
+function editWorkoutEntry(id, mode){
+  addTargetMode = mode;
+  const entry = currentAddTarget().workouts.find(w=>w.id===id);
+  if(!entry) return;
+  editingWorkoutId = id;
+  document.getElementById('overlay-workout').classList.add('show');
+  document.getElementById('workout-modal-title').textContent = 'Редактировать тренировку';
+  document.getElementById('workout-search').value='';
+  document.getElementById('workout-suggest').innerHTML='';
+  workoutSelectedName = entry.name;
+  workoutMode = 'manual';
+  document.getElementById('workout-selected-name').textContent = entry.name;
+  document.getElementById('workout-met-row').style.display='none';
+  document.getElementById('workout-manual-row').style.display='flex';
+  document.getElementById('workout-manual-kcal').value = entry.kcal;
+  document.getElementById('workout-selected').style.display='block';
+  updateWorkoutPreview();
+}
+
+function onWorkoutSearch(){
+  const q = document.getElementById('workout-search').value.trim().toLowerCase();
+  const list = document.getElementById('workout-suggest');
+  if(q.length < 1){ list.innerHTML=''; return; }
+  const matches = WORKOUT_DB.filter(([n])=>n.toLowerCase().includes(q)).slice(0,7);
+  list.innerHTML = matches.length ? matches.map(([n,met])=>`
+    <div class="suggest-item" onclick='selectWorkout(${JSON.stringify(n)}, ${met})'>
+      <div class="n">${escapeHtml(n)}</div>
+      <div class="k">MET ${met}</div>
+    </div>`).join('') : `<div class="empty-hint">Не найдено. Можно ввести свою активность вручную.</div>`;
+}
+
+let currentMet = 0;
+function selectWorkout(name, met){
+  workoutSelectedName = name; currentMet = met; workoutMode = 'met';
+  document.getElementById('workout-selected-name').textContent = name;
+  document.getElementById('workout-met-row').style.display='flex';
+  document.getElementById('workout-manual-row').style.display='none';
+  document.getElementById('workout-minutes').value = 30;
+  document.getElementById('workout-selected').style.display='block';
+  updateWorkoutPreview();
+  const woSelBox = document.getElementById('workout-selected');
+  if(woSelBox.scrollIntoView) woSelBox.scrollIntoView({behavior:'smooth', block:'nearest'});
+}
+
+function manualWorkoutEntry(){
+  const q = document.getElementById('workout-search').value.trim();
+  workoutSelectedName = q || 'Своя активность'; workoutMode = 'manual';
+  document.getElementById('workout-selected-name').textContent = workoutSelectedName;
+  document.getElementById('workout-met-row').style.display='none';
+  document.getElementById('workout-manual-row').style.display='flex';
+  document.getElementById('workout-manual-kcal').value='';
+  document.getElementById('workout-selected').style.display='block';
+  updateWorkoutPreview();
+  document.getElementById('workout-manual-kcal').focus();
+}
+
+function updateWorkoutPreview(){
+  let kcal = 0;
+  if(workoutMode === 'met'){
+    const minutes = parseFloat(document.getElementById('workout-minutes').value) || 0;
+    const weight = profile ? profile.weight : 70;
+    kcal = currentMet * 3.5 * weight / 200 * minutes;
+  } else {
+    kcal = parseFloat(document.getElementById('workout-manual-kcal').value) || 0;
+  }
+  document.getElementById('workout-preview-kcal').textContent = fmt(kcal);
+}
+
+async function confirmAddWorkout(){
+  const name = workoutSelectedName || 'Тренировка';
+  let kcal, minutes = null;
+  if(workoutMode === 'met'){
+    minutes = parseFloat(document.getElementById('workout-minutes').value) || 0;
+    const weight = profile ? profile.weight : 70;
+    kcal = Math.round(currentMet * 3.5 * weight / 200 * minutes);
+  } else {
+    kcal = Math.round(parseFloat(document.getElementById('workout-manual-kcal').value) || 0);
+  }
+  if(kcal<=0){ showToast('Укажите значение больше 0'); return; }
+  const target = currentAddTarget();
+
+  if(editingWorkoutId){
+    const entry = target.workouts.find(w=>w.id===editingWorkoutId);
+    if(entry){ entry.name=name; entry.kcal=kcal; if(minutes!==null) entry.minutes=minutes; }
+    editingWorkoutId = null;
+  } else {
+    target.workouts.push({
+      id: Date.now()+'-'+Math.random().toString(36).slice(2,7),
+      name, minutes, kcal,
+      time: new Date().toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})
+    });
+  }
+  await persistAddTarget();
+  closeWorkoutModal();
+  showToast('Сохранено: '+name);
+}
+
+/* ===================== INIT ===================== */
+async function init(){
+  profile = await storeGet('profile');
+  customFoods = (await storeGet('custom_foods')) || [];
+  const savedToday = await storeGet('day:'+todayKey());
+  today = savedToday || {foods:[], workouts:[], steps:0};
+  today.steps = today.steps || 0;
+
+  document.getElementById('in-age').addEventListener('input', updateTdeePreview);
+  document.getElementById('in-weight').addEventListener('input', updateTdeePreview);
+  document.getElementById('in-height').addEventListener('input', updateTdeePreview);
+
+  currentDayKey = todayKey();
+
+  if(!profile){
+    switchView('profile');
+    showToast('Заполни профиль, чтобы рассчитать бюджет калорий');
+    genderVal='m'; activityVal=1.375; goalVal='maintain';
+    updateSegUI(); updateTdeePreview();
+  } else {
+    switchView('today');
+  }
+  renderToday();
+
+  // Auto-resume the pedometer if it was running before the app was last closed/reloaded.
+  if(localStorage.getItem('cal_pedo_enabled') === 'true'){
+    startPedometer();
+  } else {
+    renderPedometer();
+  }
+
+  // Catch date rollover if the app is left open (or backgrounded as a PWA) across midnight,
+  // and make sure any not-yet-persisted steps are saved before the app is backgrounded/closed.
+  document.addEventListener('visibilitychange', ()=>{
+    if(!document.hidden) checkDayRollover();
+    else if(pedoUnsavedSteps > 0) pedoFlush();
+  });
+  window.addEventListener('focus', checkDayRollover);
+  window.addEventListener('pagehide', ()=>{ if(pedoUnsavedSteps > 0) pedoFlush(); });
+  setInterval(checkDayRollover, 60*1000);
+}
+init();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('service-worker.js').catch(e=>console.warn('SW registration failed', e));
+  });
+}
+
+</script>
+</body>
+</html>
